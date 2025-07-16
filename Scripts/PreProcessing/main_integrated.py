@@ -280,7 +280,13 @@ class SappoIntegratedGUI:
         ttk.Label(parent, text="Learning Rate:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         self.lr_var = tk.StringVar(value="0.0001")
         ttk.Entry(parent, textvariable=self.lr_var, width=10).grid(row=0, column=1, padx=(0, 20))
-        
+
+        # --- 👇 [새 코드 추가] 이 부분을 추가하세요 ---
+        ttk.Label(parent, text="Entropy Coef:").grid(row=0, column=6, sticky=tk.W, padx=(0, 5))
+        self.ent_coef_var = tk.StringVar(value="0.01") # 기본값 0.01로 설정
+        ttk.Entry(parent, textvariable=self.ent_coef_var, width=10).grid(row=0, column=7)
+        # --- 👆 [새 코드 추가] 여기까지 ---
+
         # Gamma
         ttk.Label(parent, text="Gamma:").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
         self.gamma_var = tk.StringVar(value="0.99")
@@ -461,7 +467,10 @@ class SappoIntegratedGUI:
         try:
             hyperparams = {
                 'learning_rate': float(self.lr_var.get()),
-                'gamma': float(self.gamma_var.get())
+                
+                'gamma': float(self.gamma_var.get()),
+                'ent_coef': float(self.ent_coef_var.get()) # 엔트로피 계수 값 가져오기
+
             }
             
             reward_weights = {

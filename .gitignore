@@ -7,6 +7,8 @@ data/
 # Results folders
 results/
 Results/
+models/
+*/models/
 */results/
 */Results/
 

@@ -8,8 +8,12 @@ class TradingEnv(gym.Env):
     """
     Custom Trading Environment for Reinforcement Learning
     
-    State: (24, 529) tensor with 24-hour lookback window
-    - 527 market features from preprocessing
+    Supports both standard and raw preprocessing modes:
+    - Standard: Engineered features with percentage changes and indicators
+    - Raw: Pure OHLCV data + time features for AI self-learning
+    
+    State: (window_size, n_features) tensor with lookback window
+    - market features from preprocessing (varies by mode)
     - 2 portfolio features (position, unrealized PnL)
     
     Actions: 
@@ -22,7 +26,8 @@ class TradingEnv(gym.Env):
                  data_array: np.ndarray,
                  initial_balance: float = 10000.0,
                  transaction_cost: float = 0.001,
-                 reward_weights: Dict[str, float] = None):
+                 reward_weights: Dict[str, float] = None,
+                 price_column_name: str = None):
         """
         Initialize Trading Environment
         
@@ -31,12 +36,17 @@ class TradingEnv(gym.Env):
             initial_balance: Starting portfolio balance
             transaction_cost: Cost per trade (as fraction)
             reward_weights: Weights for reward components
+            price_column_name: Name/pattern to identify price column (auto-detect if None)
         """
         super().__init__()
         
         # Data setup
         self.data = data_array
         self.n_samples, self.window_size, self.n_features = data_array.shape
+        self.price_column_name = price_column_name
+        
+        # Auto-detect price column for different preprocessing modes
+        self.price_column_idx = self._detect_price_column()
         
         # Portfolio setup
         self.initial_balance = initial_balance
@@ -224,15 +234,37 @@ class TradingEnv(gym.Env):
         
         return reward
     
-    def _get_current_price(self) -> float:
-        """Get current reference price (first coin's close price)"""
-        # Find first close price column
-        step_data = self.data[self.current_step, -1, :]  # Last time step of current window
+    def _detect_price_column(self) -> int:
+        """
+        Auto-detect price column index based on preprocessing mode
         
-        # Use first available close price as reference
-        # This is a simplified approach - in practice you might want to use a specific coin
-        close_price_idx = -1 # <- 수정된 코드 (마지막 인덱스)
-        return float(step_data[close_price_idx])
+        For raw mode: looks for time features to determine where price data ends
+        For standard mode: uses the last feature as reference price
+        """
+        # For raw mode, time features are at the end (hour_of_day, day_of_week, day_of_month)
+        # So we want the close price just before time features
+        # For standard mode, the last feature should be raw_close_price
+        
+        # Simple heuristic: if last 3 features seem like time data (small integer values)
+        # then we're in raw mode, otherwise standard mode
+        sample_data = self.data[0, -1, :]  # First sample, last timestep
+        
+        # Check if last 3 features look like time data
+        last_three = sample_data[-3:]
+        if (all(0 <= val <= 31 for val in last_three) and  # reasonable time ranges
+            last_three[0] <= 23 and  # hour_of_day
+            last_three[1] <= 6):     # day_of_week
+            # Raw mode: find first close column (should be index 3, 8, 13, etc. pattern)
+            # For simplicity, use the 4th column (first close) as reference
+            return 3  # First close column in raw OHLCV data
+        else:
+            # Standard mode: use last column (raw_close_price)
+            return -1
+    
+    def _get_current_price(self) -> float:
+        """Get current reference price using detected price column"""
+        step_data = self.data[self.current_step, -1, :]  # Last time step of current window
+        return float(step_data[self.price_column_idx])
     
     def _get_observation(self) -> np.ndarray:
         """Get current observation state"""

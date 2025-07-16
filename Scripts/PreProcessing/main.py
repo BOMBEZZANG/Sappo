@@ -6,6 +6,7 @@ import threading
 import os
 from datetime import datetime
 from preprocessing import DataPreprocessor
+from raw_preprocessing import RawDataPreprocessor
 
 class SappoPreprocessingGUI:
     def __init__(self, root):
@@ -16,6 +17,8 @@ class SappoPreprocessingGUI:
         self.loaded_files = {}
         self.processed_data = None
         self.preprocessor = DataPreprocessor(window_size=24)
+        self.raw_preprocessor = RawDataPreprocessor(window_size=24)
+        self.preprocessing_mode = tk.StringVar(value="standard")
         
         self.setup_ui()
         
@@ -32,6 +35,7 @@ class SappoPreprocessingGUI:
         controls_frame = ttk.LabelFrame(main_frame, text="Controls", padding="10")
         controls_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
+        # File selection
         self.select_files_btn = ttk.Button(
             controls_frame, 
             text="Select Data Files", 
@@ -39,13 +43,38 @@ class SappoPreprocessingGUI:
         )
         self.select_files_btn.grid(row=0, column=0, padx=(0, 10))
         
+        # Preprocessing mode selection
+        mode_frame = ttk.Frame(controls_frame)
+        mode_frame.grid(row=0, column=1, padx=(10, 10))
+        
+        ttk.Label(mode_frame, text="Mode:").grid(row=0, column=0, padx=(0, 5))
+        
+        self.standard_radio = ttk.Radiobutton(
+            mode_frame, 
+            text="Standard (Engineered Features)", 
+            variable=self.preprocessing_mode, 
+            value="standard",
+            command=self.on_mode_change
+        )
+        self.standard_radio.grid(row=0, column=1, padx=(0, 10))
+        
+        self.raw_radio = ttk.Radiobutton(
+            mode_frame, 
+            text="Raw Data (AI Self-Learning)", 
+            variable=self.preprocessing_mode, 
+            value="raw",
+            command=self.on_mode_change
+        )
+        self.raw_radio.grid(row=0, column=2)
+        
+        # Start processing button
         self.start_processing_btn = ttk.Button(
             controls_frame, 
             text="Start Preprocessing", 
             command=self.start_preprocessing,
             state="disabled"
         )
-        self.start_processing_btn.grid(row=0, column=1)
+        self.start_processing_btn.grid(row=1, column=0, columnspan=3, pady=(10, 0))
         
         # Progress Section
         progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding="10")
@@ -77,6 +106,8 @@ class SappoPreprocessingGUI:
         scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         
         self.log_message("Application initialized. Ready to process data.")
+        self.log_message("Standard mode: Creates engineered features (returns, volatility, correlations)")
+        self.log_message("Raw mode: Minimal processing - AI learns from pure OHLCV + time data")
         
     def log_message(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -93,6 +124,15 @@ class SappoPreprocessingGUI:
         if status:
             self.progress_label.config(text=status)
         self.root.update_idletasks()
+    
+    def on_mode_change(self):
+        """Handle preprocessing mode change"""
+        mode = self.preprocessing_mode.get()
+        if mode == "standard":
+            self.log_message("Mode: Standard preprocessing with engineered features")
+        elif mode == "raw":
+            self.log_message("Mode: Raw data preprocessing for AI self-learning")
+            self.log_message("⚠️  Raw mode provides minimal features - AI must discover patterns itself")
         
     def select_files(self):
         file_paths = filedialog.askopenfilenames(
@@ -135,7 +175,8 @@ class SappoPreprocessingGUI:
         
     def run_preprocessing(self):
         try:
-            self.log_message("Starting preprocessing pipeline...")
+            mode = self.preprocessing_mode.get()
+            self.log_message(f"Starting {mode} preprocessing pipeline...")
             self.update_progress(0, "Initializing...")
             
             def progress_callback(progress, status=""):
@@ -143,25 +184,40 @@ class SappoPreprocessingGUI:
                 if status:
                     self.log_message(status)
             
-            # Run the complete preprocessing pipeline
-            self.processed_data = self.preprocessor.preprocess_pipeline(
-                self.loaded_files, 
-                progress_callback
-            )
+            # Run the appropriate preprocessing pipeline
+            if mode == "raw":
+                self.log_message("🔄 Using RAW data approach - AI will learn everything from scratch")
+                self.processed_data = self.raw_preprocessor.raw_preprocess_pipeline(
+                    self.loaded_files, 
+                    progress_callback
+                )
+                mode_suffix = "raw"
+            else:
+                self.log_message("🔄 Using STANDARD approach with engineered features")
+                self.processed_data = self.preprocessor.preprocess_pipeline(
+                    self.loaded_files, 
+                    progress_callback
+                )
+                mode_suffix = "standard"
             
             # Save results
             self.log_message("Saving unified dataset...")
-            output_path = self.save_results(self.processed_data)
+            output_path = self.save_results(self.processed_data, mode_suffix)
             
             self.update_progress(100, "Complete!")
-            self.log_message(f"Multi-coin preprocessing completed successfully!")
+            self.log_message(f"✅ {mode.capitalize()} preprocessing completed successfully!")
             self.log_message(f"Output saved to: {output_path}")
             self.log_message(f"Final unified dataset shape: {self.processed_data.shape}")
             self.log_message(f"Ready for RL training with {self.processed_data.shape[0]} samples")
-            self.log_message(f"Each sample contains {self.processed_data.shape[2]} features from all coins")
+            
+            if mode == "raw":
+                self.log_message(f"🤖 Each sample: {self.processed_data.shape[2]} RAW features (OHLCV + time)")
+                self.log_message("🧠 AI must discover: price patterns, volatility, correlations, cycles")
+            else:
+                self.log_message(f"📊 Each sample: {self.processed_data.shape[2]} engineered features")
             
         except Exception as e:
-            self.log_message(f"Error during preprocessing: {str(e)}")
+            self.log_message(f"❌ Error during preprocessing: {str(e)}")
             self.update_progress(0, "Error occurred")
         
         finally:
@@ -169,7 +225,7 @@ class SappoPreprocessingGUI:
             self.select_files_btn.config(state="normal")
     
     
-    def save_results(self, data):
+    def save_results(self, data, mode_suffix="standard"):
         # Create results folder if it doesn't exist
         results_dir = "results"
         if not os.path.exists(results_dir):
@@ -177,7 +233,7 @@ class SappoPreprocessingGUI:
             self.log_message(f"Created results directory: {results_dir}")
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"preprocessed_data_{timestamp}.npy"
+        output_filename = f"preprocessed_data_{mode_suffix}_{timestamp}.npy"
         output_path = os.path.join(results_dir, output_filename)
         
         np.save(output_path, data)

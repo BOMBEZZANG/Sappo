@@ -148,6 +148,8 @@ class TradingAgent:
                  env,
                  learning_rate: float = 0.0001,
                  gamma: float = 0.99,
+                 ent_coef: float = 0.01, # <-- 파라미터 추가
+
                  n_steps: int = 2048,
                  batch_size: int = 64,
                  n_epochs: int = 10,
@@ -172,6 +174,7 @@ class TradingAgent:
             env,
             learning_rate=learning_rate,
             gamma=gamma,
+            ent_coef=ent_coef, # <-- PPO 모델에 전달
             n_steps=n_steps,
             batch_size=batch_size,
             n_epochs=n_epochs,
@@ -309,6 +312,8 @@ def create_trading_agent(env, hyperparameters: Dict = None):
     default_params = {
         'learning_rate': 0.0001,
         'gamma': 0.99,
+        'ent_coef': 0.01, # 기본값 설정
+
         'n_steps': 2048,
         'batch_size': 64,
         'n_epochs': 10,
