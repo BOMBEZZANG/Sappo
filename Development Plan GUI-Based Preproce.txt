@@ -1,0 +1,100 @@
+Development Plan: GUI-Based Preprocessing Tool for RL Trading Bot
+1. Project Objective
+To develop a user-friendly desktop application using Python that loads multi-asset, multi-timeframe cryptocurrency data (price and volume). The application will execute a specific preprocessing pipeline to prepare the data for a Reinforcement Learning model. The user will be able to monitor the process in real-time through a progress bar and a results log.
+
+2. Key Features
+Simple GUI: A clean and intuitive main window.
+
+Data Input: A button to allow the user to select multiple data files (Input: Four separate .csv files for each timeframe (1h, 4h, 1d, 1w), formatted as upbit_{coin_name}_{interval}.csv.
+
+
+Process Control: A "Start Preprocessing" button to initiate the data pipeline.
+
+Progress Visualization: A ProgressBar that visually tracks the completion of the time-consuming preprocessing steps.
+
+Status & Results View: A text area that displays real-time logs of the current operation (e.g., "Loading data...", "Normalizing windows...") and a final summary of the results (e.g., shape of the final dataset, location of the saved file).
+
+Data Output: The final preprocessed data will be saved to a file (e.g., NumPy .npy file) for easy loading into the RL training environment.
+
+3. Technology Stack
+Language: Python 3.x
+
+GUI Framework: Tkinter (specifically the ttk module for a modern look and feel), as it is built into Python and is excellent for simple UIs.
+
+Data Manipulation: Pandas for loading, resampling, and structuring the time-series data.
+
+Numerical Operations & Scaling: NumPy for efficient array operations and Scikit-learn for the StandardScaler normalization.
+
+4. Development Phases
+Phase 1: GUI Scaffolding & Design
+Task: Create the main application window.
+
+Details:
+
+Design the layout with three main sections:
+
+Controls: Place the "Select Data Files" and "Start Preprocessing" buttons.
+
+Progress: Add a ttk.Progressbar widget.
+
+Log View: Add a Text widget (read-only) to display status messages and results.
+
+Outcome: A static, non-functional window that shows the complete user interface.
+
+Phase 2: Data Loading and Management
+Task: Implement the logic for the "Select Data Files" button.
+
+Details:
+
+Use tkinter.filedialog to open a native file selection window.
+
+Allow the user to select multiple CSV files.
+
+Load the selected files into a dictionary of Pandas DataFrames, keyed by filename or timeframe.
+
+Display the names of the loaded files in the log view.
+
+Outcome: The application can successfully load user-selected data into memory.
+
+Phase 3: Core Preprocessing Pipeline Implementation
+Task: Develop the backend functions for data transformation as standalone modules.
+
+Details:
+
+Unify Timeframes: Create a function to resample and forward-fill all data onto the 1-hour base timeframe.
+
+Feature Engineering: Create a function to convert absolute prices into percentage change values.
+
+Create Sliding Windows: Implement a function to transform the time-series data into a 3D array of (samples, window_size, features).
+
+Normalize Windows: Implement a function that iterates through each window and applies Z-score normalization (StandardScaler). This will be the most computationally intensive step.
+
+Outcome: A set of Python functions that can take raw DataFrames and produce a final, normalized NumPy array.
+
+Phase 4: Integration and GUI Feedback
+Task: Connect the backend logic to the GUI and provide real-time feedback.
+
+Details:
+
+Link the "Start Preprocessing" button to trigger the pipeline functions from Phase 3.
+
+Update the ProgressBar during the window normalization loop. For a set of N windows, the progress bar should advance by 1/N for each window processed.
+
+Update the Text log view before and after each major step (e.g., "Starting unification...", "Unification complete.", "Normalizing 5,000 windows...").
+
+Ensure the GUI remains responsive during processing by running the pipeline in a separate thread.
+
+Outcome: A fully functional application where the user can initiate the process and see live feedback.
+
+Phase 5: Finalization and Testing
+Task: Implement the final data saving step and conduct testing.
+
+Details:
+
+After preprocessing is complete, save the final NumPy array to a .npy file using numpy.save().
+
+Display the path to the saved file and the final data shape in the log view.
+
+Test the entire application with various sample datasets to ensure robustness and correctness.
+
+Outcome: A stable, tested, and complete preprocessing tool.
