@@ -316,21 +316,36 @@ class TrainingPipeline:
         if self.log_callback:
             self.log_callback("Environments created successfully")
     
-    def setup_agent(self):
+    def setup_agent(self, resume_from_model=None):
         """Setup trading agent"""
-        if self.log_callback:
-            self.log_callback("Initializing trading agent...")
-        
-        self.agent = create_trading_agent(
-            env=self.train_env,
-            hyperparameters=self.hyperparameters
-        )
-        
-        # Get network summary
-        summary = self.agent.get_network_summary()
-        if self.log_callback:
-            self.log_callback(f"Agent created - Total parameters: {summary['total_parameters']:,}")
-            self.log_callback(f"Device: {summary['device']}")
+        if resume_from_model and os.path.exists(resume_from_model):
+            if self.log_callback:
+                self.log_callback(f"Loading agent from saved model: {resume_from_model}")
+            
+            # Load existing model
+            from stable_baselines3 import PPO
+            self.agent = PPO.load(resume_from_model)
+            
+            # Set the environment for the loaded model
+            self.agent.set_env(self.train_env)
+            
+            if self.log_callback:
+                self.log_callback(f"Agent loaded successfully from: {os.path.basename(resume_from_model)}")
+                self.log_callback(f"Model will continue training from previous state")
+        else:
+            if self.log_callback:
+                self.log_callback("Initializing new trading agent...")
+            
+            self.agent = create_trading_agent(
+                env=self.train_env,
+                hyperparameters=self.hyperparameters
+            )
+            
+            # Get network summary
+            summary = self.agent.get_network_summary()
+            if self.log_callback:
+                self.log_callback(f"Agent created - Total parameters: {summary['total_parameters']:,}")
+                self.log_callback(f"Device: {summary['device']}")
     
     def setup_callback(self, best_model_path: str):
         """Setup validation callback"""
@@ -345,13 +360,15 @@ class TrainingPipeline:
     
     def train(self, 
               total_timesteps: int = 100000,
-              model_save_dir: str = "models") -> Dict:
+              model_save_dir: str = "models",
+              resume_from_model: str = None) -> Dict:
         """
         Execute complete training pipeline
         
         Args:
             total_timesteps: Total training timesteps
             model_save_dir: Directory to save models
+            resume_from_model: Path to model file to resume from (optional)
             
         Returns:
             Dictionary with training results
@@ -366,25 +383,39 @@ class TrainingPipeline:
             # Setup environments
             self.setup_environments(train_data, val_data)
             
-            # Setup agent
-            self.setup_agent()
+            # Setup agent (new or resumed)
+            self.setup_agent(resume_from_model)
             
             # Setup callback
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            best_model_path = os.path.join(model_save_dir, f"best_model_{timestamp}.zip")
+            if resume_from_model:
+                # For resume, use a continuation suffix
+                best_model_path = os.path.join(model_save_dir, f"resumed_best_model_{timestamp}.zip")
+            else:
+                best_model_path = os.path.join(model_save_dir, f"best_model_{timestamp}.zip")
             self.setup_callback(best_model_path)
             
             # Start training
             if self.log_callback:
-                self.log_callback(f"Starting training for {total_timesteps:,} timesteps...")
+                if resume_from_model:
+                    self.log_callback(f"Resuming training for {total_timesteps:,} additional timesteps...")
+                else:
+                    self.log_callback(f"Starting training for {total_timesteps:,} timesteps...")
             
-            self.agent.train(
+            # For resumed training, we don't want to reset the timestep counter
+            reset_num_timesteps = not bool(resume_from_model)
+            
+            self.agent.learn(
                 total_timesteps=total_timesteps,
-                callback=self.callback
+                callback=self.callback,
+                reset_num_timesteps=reset_num_timesteps
             )
             
             # Save final model
-            final_model_path = os.path.join(model_save_dir, f"final_model_{timestamp}.zip")
+            if resume_from_model:
+                final_model_path = os.path.join(model_save_dir, f"resumed_final_model_{timestamp}.zip")
+            else:
+                final_model_path = os.path.join(model_save_dir, f"final_model_{timestamp}.zip")
             self.agent.save(final_model_path)
             
             # Compile results
@@ -400,7 +431,9 @@ class TrainingPipeline:
                     'total_timesteps': total_timesteps,
                     'evaluation_frequency': self.callback.eval_freq,
                     'n_evaluation_episodes': self.callback.n_eval_episodes,
-                    'total_evaluations': len(self.callback.evaluations)
+                    'total_evaluations': len(self.callback.evaluations),
+                    'resumed_from_model': resume_from_model,
+                    'is_resumed_training': bool(resume_from_model)
                 },
                 'data_split': {
                     'train_samples': train_data.shape[0],
@@ -442,7 +475,8 @@ def train_sappo_agent(data_path: str,
                      total_timesteps: int = 100000,
                      model_save_dir: str = "models",
                      log_callback: Callable = None,
-                     progress_callback: Callable = None) -> Dict:
+                     progress_callback: Callable = None,
+                     resume_from_model: str = None) -> Dict:
     """
     Main function to train Sappo trading agent
     
@@ -454,6 +488,7 @@ def train_sappo_agent(data_path: str,
         model_save_dir: Directory to save models
         log_callback: Callback for logging
         progress_callback: Callback for structured progress updates
+        resume_from_model: Path to model file to resume from (optional)
         
     Returns:
         Training results dictionary
@@ -468,7 +503,8 @@ def train_sappo_agent(data_path: str,
     
     results = pipeline.train(
         total_timesteps=total_timesteps,
-        model_save_dir=model_save_dir
+        model_save_dir=model_save_dir,
+        resume_from_model=resume_from_model
     )
     
     # Save training log

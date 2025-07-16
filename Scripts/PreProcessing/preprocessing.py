@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler,MinMaxScaler 
 from typing import Dict, List, Tuple
 import os
 
@@ -224,7 +224,7 @@ class DataPreprocessor:
             window = windowed_data[i].reshape(-1, 1)
             
             # Fit and transform
-            scaler = StandardScaler()
+            scaler = MinMaxScaler() # StandardScaler() 대신 MinMaxScaler() 사용
             normalized_window = scaler.fit_transform(window)
             
             # Reshape back to original window shape

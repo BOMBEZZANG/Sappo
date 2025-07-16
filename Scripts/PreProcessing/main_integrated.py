@@ -158,13 +158,37 @@ class SappoIntegratedGUI:
         control_frame = ttk.LabelFrame(self.training_frame, text="Training Controls", padding="10")
         control_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
+        # Row 0: Model selection for resume
+        ttk.Label(control_frame, text="Resume from Model:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        
+        self.resume_model_path_var = tk.StringVar()
+        self.resume_model_entry = ttk.Entry(control_frame, textvariable=self.resume_model_path_var, 
+                                           state="readonly", width=40)
+        self.resume_model_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        
+        self.select_model_btn = ttk.Button(
+            control_frame, 
+            text="Select Model", 
+            command=self.select_model_for_resume
+        )
+        self.select_model_btn.grid(row=0, column=2, padx=(0, 10))
+        
+        # Row 1: Training buttons
         self.train_btn = ttk.Button(
             control_frame, 
-            text="Start Training", 
+            text="Start New Training", 
             command=self.start_training,
             state="disabled"
         )
-        self.train_btn.grid(row=0, column=0, padx=(0, 10))
+        self.train_btn.grid(row=1, column=0, padx=(0, 10), pady=(10, 0))
+        
+        self.resume_btn = ttk.Button(
+            control_frame, 
+            text="Resume Training", 
+            command=self.resume_training,
+            state="disabled"
+        )
+        self.resume_btn.grid(row=1, column=1, padx=(0, 10), pady=(10, 0))
         
         self.evaluate_btn = ttk.Button(
             control_frame, 
@@ -172,14 +196,18 @@ class SappoIntegratedGUI:
             command=self.start_evaluation,
             state="disabled"
         )
-        self.evaluate_btn.grid(row=0, column=1, padx=(0, 10))
+        self.evaluate_btn.grid(row=1, column=2, padx=(0, 10), pady=(10, 0))
         
+        # Row 2: TensorBoard button
         self.tensorboard_btn = ttk.Button(
             control_frame, 
             text="Open TensorBoard", 
             command=self.open_tensorboard
         )
-        self.tensorboard_btn.grid(row=0, column=2)
+        self.tensorboard_btn.grid(row=2, column=0, pady=(10, 0))
+        
+        # Configure grid weights
+        control_frame.columnconfigure(1, weight=1)
         
         # Results Section
         results_frame = ttk.LabelFrame(self.training_frame, text="Results & Visualization", padding="10")
@@ -215,7 +243,7 @@ class SappoIntegratedGUI:
         
         # Enable RL controls if available
         if not RL_AVAILABLE:
-            for widget in [self.train_btn, self.evaluate_btn]:
+            for widget in [self.train_btn, self.resume_btn, self.evaluate_btn]:
                 widget.configure(state="disabled")
     
     def setup_evaluation_progress_tab(self):
@@ -430,6 +458,9 @@ class SappoIntegratedGUI:
             self.data_path_var.set(output_path)
             if RL_AVAILABLE:
                 self.train_btn.config(state="normal")
+                # Enable resume button if model is also selected
+                if self.resume_model_path_var.get():
+                    self.resume_btn.config(state="normal")
             
         except Exception as e:
             self.log_message(f"Error during preprocessing: {str(e)}")
@@ -466,6 +497,9 @@ class SappoIntegratedGUI:
             self.data_path_var.set(file_path)
             if RL_AVAILABLE:
                 self.train_btn.config(state="normal")
+                # Enable resume button if model is also selected
+                if self.resume_model_path_var.get():
+                    self.resume_btn.config(state="normal")
             self.log_training_message(f"Selected data file: {os.path.basename(file_path)}")
     
     def get_hyperparameters(self):
@@ -496,8 +530,22 @@ class SappoIntegratedGUI:
             messagebox.showerror("Invalid Parameters", f"Please check your hyperparameters: {str(e)}")
             return None, None, None
     
-    def start_training(self):
-        """Start RL training"""
+    def select_model_for_resume(self):
+        """Select a model file for resume training"""
+        file_path = filedialog.askopenfilename(
+            title="Select Model File to Resume",
+            filetypes=[("Model files", "*.zip"), ("All files", "*.*")],
+            initialdir="models"
+        )
+        
+        if file_path:
+            self.resume_model_path_var.set(file_path)
+            if RL_AVAILABLE and self.data_path_var.get():
+                self.resume_btn.config(state="normal")
+            self.log_training_message(f"Selected model for resume: {os.path.basename(file_path)}")
+    
+    def start_training(self, resume=False):
+        """Start RL training (new or resumed)"""
         if not RL_AVAILABLE:
             messagebox.showerror("RL Not Available", f"RL modules not installed: {RL_IMPORT_ERROR}")
             return
@@ -506,24 +554,38 @@ class SappoIntegratedGUI:
             messagebox.showwarning("Warning", "Please select preprocessed data file first.")
             return
         
+        if resume and not self.resume_model_path_var.get():
+            messagebox.showwarning("Warning", "Please select a model file to resume from.")
+            return
+        
         hyperparams, reward_weights, total_timesteps = self.get_hyperparameters()
         if hyperparams is None:
             return
         
         self.train_btn.config(state="disabled")
+        self.resume_btn.config(state="disabled")
         self.evaluate_btn.config(state="disabled")
         
-        self.log_training_message("Starting RL training...")
+        if resume:
+            self.log_training_message(f"Resuming training from: {os.path.basename(self.resume_model_path_var.get())}")
+        else:
+            self.log_training_message("Starting new RL training...")
         
-        # Clear previous evaluation results
-        self.clear_evaluation_progress()
+        # Clear previous evaluation results if starting new training
+        if not resume:
+            self.clear_evaluation_progress()
         
+        resume_model_path = self.resume_model_path_var.get() if resume else None
         thread = threading.Thread(target=self.run_training, 
-                                args=(hyperparams, reward_weights, total_timesteps))
+                                args=(hyperparams, reward_weights, total_timesteps, resume_model_path))
         thread.daemon = True
         thread.start()
     
-    def run_training(self, hyperparams, reward_weights, total_timesteps):
+    def resume_training(self):
+        """Resume training from selected model"""
+        self.start_training(resume=True)
+    
+    def run_training(self, hyperparams, reward_weights, total_timesteps, resume_model_path=None):
         """Run RL training in separate thread"""
         try:
             results = train_sappo_agent(
@@ -533,13 +595,17 @@ class SappoIntegratedGUI:
                 total_timesteps=total_timesteps,
                 model_save_dir="models",
                 log_callback=self.log_training_message,
-                progress_callback=self.update_evaluation_progress
+                progress_callback=self.update_evaluation_progress,
+                resume_from_model=resume_model_path
             )
             
             self.training_results = results
             
             if results['success']:
-                self.log_training_message("🎉 Training completed successfully!")
+                if resume_model_path:
+                    self.log_training_message("🎉 Resume training completed successfully!")
+                else:
+                    self.log_training_message("🎉 Training completed successfully!")
                 self.log_training_message(f"Best model saved: {results['best_model_path']}")
                 self.log_training_message(f"Best Sharpe ratio: {results['best_sharpe_ratio']:.4f}")
                 self.evaluate_btn.config(state="normal")
@@ -551,6 +617,8 @@ class SappoIntegratedGUI:
         
         finally:
             self.train_btn.config(state="normal")
+            if self.resume_model_path_var.get() and self.data_path_var.get():
+                self.resume_btn.config(state="normal")
     
     def clear_evaluation_progress(self):
         """Clear the evaluation progress table"""

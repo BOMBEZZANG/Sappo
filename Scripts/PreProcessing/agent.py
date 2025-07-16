@@ -192,13 +192,14 @@ class TradingAgent:
             'validation_scores': []
         }
     
-    def train(self, total_timesteps: int, callback=None):
+    def train(self, total_timesteps: int, callback=None, reset_num_timesteps=True):
         """
         Train the agent
         
         Args:
             total_timesteps: Total number of training steps
             callback: Optional callback for monitoring
+            reset_num_timesteps: Whether to reset timestep counter (False for resuming)
         """
         print(f"Starting training for {total_timesteps} timesteps...")
         print(f"Using device: {self.model.device}")
@@ -206,10 +207,27 @@ class TradingAgent:
         self.model.learn(
             total_timesteps=total_timesteps,
             callback=callback,
-            tb_log_name="sappo_trading"
+            tb_log_name="sappo_trading",
+            reset_num_timesteps=reset_num_timesteps
         )
         
         print("Training completed!")
+    
+    def learn(self, total_timesteps: int, callback=None, reset_num_timesteps=True):
+        """
+        Direct access to PPO learn method for resuming training
+        
+        Args:
+            total_timesteps: Total number of training steps
+            callback: Optional callback for monitoring
+            reset_num_timesteps: Whether to reset timestep counter (False for resuming)
+        """
+        return self.model.learn(
+            total_timesteps=total_timesteps,
+            callback=callback,
+            tb_log_name="sappo_trading",
+            reset_num_timesteps=reset_num_timesteps
+        )
     
     def predict(self, observation, deterministic=True):
         """
