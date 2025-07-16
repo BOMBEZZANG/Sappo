@@ -291,8 +291,11 @@ class SappoIntegratedGUI:
         # Best metrics display
         self.best_sharpe_var = tk.StringVar(value="N/A")
         self.best_return_var = tk.StringVar(value="N/A")
+        self.best_reward_var = tk.StringVar(value="N/A")
+        self.best_final_value_var = tk.StringVar(value="N/A")
         self.best_timestep_var = tk.StringVar(value="N/A")
         
+        # Row 0: Sharpe and Return
         ttk.Label(summary_frame, text="Best Sharpe:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         ttk.Label(summary_frame, textvariable=self.best_sharpe_var, font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=1, sticky=tk.W, padx=(0, 20))
         
@@ -301,6 +304,13 @@ class SappoIntegratedGUI:
         
         ttk.Label(summary_frame, text="At Step:").grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
         ttk.Label(summary_frame, textvariable=self.best_timestep_var, font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=5, sticky=tk.W)
+        
+        # Row 1: Mean Reward and Final Value
+        ttk.Label(summary_frame, text="Best Mean Reward:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+        ttk.Label(summary_frame, textvariable=self.best_reward_var, font=('TkDefaultFont', 9, 'bold')).grid(row=1, column=1, sticky=tk.W, padx=(0, 20), pady=(5, 0))
+        
+        ttk.Label(summary_frame, text="Best Final Value:").grid(row=1, column=2, sticky=tk.W, padx=(0, 5), pady=(5, 0))
+        ttk.Label(summary_frame, textvariable=self.best_final_value_var, font=('TkDefaultFont', 9, 'bold')).grid(row=1, column=3, sticky=tk.W, padx=(0, 20), pady=(5, 0))
     
     def setup_hyperparameter_inputs(self, parent):
         """Setup hyperparameter input widgets"""
@@ -607,7 +617,8 @@ class SappoIntegratedGUI:
                 else:
                     self.log_training_message("🎉 Training completed successfully!")
                 self.log_training_message(f"Best model saved: {results['best_model_path']}")
-                self.log_training_message(f"Best Sharpe ratio: {results['best_sharpe_ratio']:.4f}")
+                self.log_training_message(f"Best model achieved at step: {results.get('best_model_timestep', 0):,}")
+                self.log_training_message(f"Best metrics - Sharpe: {results['best_sharpe_ratio']:.4f}, Mean Reward: {results.get('best_mean_reward', 0):.4f}, Final Value: ${results.get('best_final_value', 0):,.2f}")
                 self.evaluate_btn.config(state="normal")
             else:
                 self.log_training_message(f"❌ Training failed: {results['error']}")
@@ -626,6 +637,8 @@ class SappoIntegratedGUI:
             self.eval_tree.delete(item)
         self.best_sharpe_var.set("N/A")
         self.best_return_var.set("N/A")
+        self.best_reward_var.set("N/A")
+        self.best_final_value_var.set("N/A")
         self.best_timestep_var.set("N/A")
     
     def update_evaluation_progress(self, evaluation_data):
@@ -673,14 +686,18 @@ class SappoIntegratedGUI:
                     self.eval_tree.set(item_id, 'Sharpe Ratio', f"{sharpe_ratio:.4f} ⭐")
                     self.best_sharpe_var.set(f"{sharpe_ratio:.4f}")
                     self.best_return_var.set(f"{total_return*100:.2f}%")
+                    self.best_reward_var.set(f"{mean_reward:.4f}")
+                    self.best_final_value_var.set(f"${final_value:,.0f}")
                     self.best_timestep_var.set(f"{timestep:,}")
                     
                     # Log the new best
-                    self.log_training_message(f"🌟 New best Sharpe ratio: {sharpe_ratio:.4f} at step {timestep:,}")
+                    self.log_training_message(f"🌟 New best model at step {timestep:,}! Sharpe: {sharpe_ratio:.4f}, Reward: {mean_reward:.4f}, Value: ${final_value:,.0f}")
             except:
                 # First entry
                 self.best_sharpe_var.set(f"{sharpe_ratio:.4f}")
                 self.best_return_var.set(f"{total_return*100:.2f}%")
+                self.best_reward_var.set(f"{mean_reward:.4f}")
+                self.best_final_value_var.set(f"${final_value:,.0f}")
                 self.best_timestep_var.set(f"{timestep:,}")
             
             # Auto-scroll to bottom

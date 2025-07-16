@@ -46,6 +46,8 @@ class ValidationCallback(BaseCallback):
         # Tracking variables
         self.best_mean_reward = -np.inf
         self.best_sharpe_ratio = -np.inf
+        self.best_final_value = -np.inf
+        self.best_model_timestep = 0
         self.evaluations = []
         self.detailed_training_history = []
         
@@ -155,17 +157,31 @@ class ValidationCallback(BaseCallback):
         else:
             print(log_msg)
         
-        # Save best model based on Sharpe ratio
-        if sharpe_ratio > self.best_sharpe_ratio:
+        # Get final value for comparison
+        final_value = avg_stats.get('final_value', 0)
+        
+        # Multi-level comparison for best model
+        is_new_best = self._is_new_best_model(sharpe_ratio, mean_reward, final_value)
+        
+        if is_new_best:
             self.best_sharpe_ratio = sharpe_ratio
             self.best_mean_reward = mean_reward
+            self.best_final_value = final_value
+            self.best_model_timestep = self.n_calls
             
             if self.best_model_save_path:
-                self.model.save(self.best_model_save_path)
+                # Generate new filename with timestep
+                new_model_path = self._generate_best_model_filename()
+                self.model.save(new_model_path)
+                
+                # Update the stored path for reference
+                self.best_model_save_path = new_model_path
+                
                 if self.log_callback:
-                    self.log_callback(f"New best model saved! Sharpe: {sharpe_ratio:.4f}")
+                    self.log_callback(f"New best model saved at step {self.n_calls:,}!")
+                    self.log_callback(f"  - Sharpe: {sharpe_ratio:.4f}, Mean Reward: {mean_reward:.4f}, Final Value: ${final_value:,.2f}")
                 else:
-                    print(f"New best model saved! Sharpe ratio: {sharpe_ratio:.4f}")
+                    print(f"New best model saved at step {self.n_calls:,}! Sharpe: {sharpe_ratio:.4f}")
         
         # Calculate aggregated trade statistics
         all_trades = []
@@ -225,6 +241,66 @@ class ValidationCallback(BaseCallback):
                 averaged[key] = np.mean(values)
         
         return averaged
+    
+    def _is_new_best_model(self, sharpe_ratio: float, mean_reward: float, final_value: float) -> bool:
+        """
+        Multi-level comparison for determining if this is a new best model
+        
+        Criteria (in order of priority):
+        1. Primary: Highest Sharpe Ratio
+        2. Secondary: If Sharpe equal, highest Mean Reward
+        3. Tertiary: If both equal, highest Final Value
+        
+        Args:
+            sharpe_ratio: Current Sharpe ratio
+            mean_reward: Current mean reward
+            final_value: Current final portfolio value
+            
+        Returns:
+            True if this is a new best model
+        """
+        # Primary comparison: Sharpe Ratio
+        if sharpe_ratio > self.best_sharpe_ratio:
+            return True
+        elif sharpe_ratio < self.best_sharpe_ratio:
+            return False
+        
+        # Secondary comparison: Mean Reward (when Sharpe ratios are equal)
+        if mean_reward > self.best_mean_reward:
+            return True
+        elif mean_reward < self.best_mean_reward:
+            return False
+        
+        # Tertiary comparison: Final Value (when both Sharpe and Mean Reward are equal)
+        if final_value > self.best_final_value:
+            return True
+        
+        return False
+    
+    def _generate_best_model_filename(self) -> str:
+        """
+        Generate filename for best model with timestep and timestamp
+        
+        Returns:
+            Filename in format: best_model_step_{timestep}_{timestamp}.zip
+        """
+        if not self.best_model_save_path:
+            return None
+        
+        # Extract directory and base info from original path
+        model_dir = os.path.dirname(self.best_model_save_path)
+        
+        # Check if this is a resumed training
+        if "resumed_best_model" in self.best_model_save_path:
+            # For resumed training, keep the resumed prefix
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"resumed_best_model_step_{self.best_model_timestep}_{timestamp}.zip"
+        else:
+            # For new training
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"best_model_step_{self.best_model_timestep}_{timestamp}.zip"
+        
+        return os.path.join(model_dir, filename)
 
 class TrainingPipeline:
     """
@@ -347,13 +423,13 @@ class TrainingPipeline:
                 self.log_callback(f"Agent created - Total parameters: {summary['total_parameters']:,}")
                 self.log_callback(f"Device: {summary['device']}")
     
-    def setup_callback(self, best_model_path: str):
+    def setup_callback(self, initial_best_model_path: str):
         """Setup validation callback"""
         self.callback = ValidationCallback(
             validation_env=self.val_env,
             eval_freq=10000,  # Evaluate every 10k steps
             n_eval_episodes=5,
-            best_model_save_path=best_model_path,
+            best_model_save_path=initial_best_model_path,
             log_callback=self.log_callback,
             progress_callback=self.progress_callback
         )
@@ -386,14 +462,14 @@ class TrainingPipeline:
             # Setup agent (new or resumed)
             self.setup_agent(resume_from_model)
             
-            # Setup callback
+            # Setup callback with initial filename (will be updated dynamically)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             if resume_from_model:
                 # For resume, use a continuation suffix
-                best_model_path = os.path.join(model_save_dir, f"resumed_best_model_{timestamp}.zip")
+                initial_best_model_path = os.path.join(model_save_dir, f"resumed_best_model_{timestamp}.zip")
             else:
-                best_model_path = os.path.join(model_save_dir, f"best_model_{timestamp}.zip")
-            self.setup_callback(best_model_path)
+                initial_best_model_path = os.path.join(model_save_dir, f"best_model_{timestamp}.zip")
+            self.setup_callback(initial_best_model_path)
             
             # Start training
             if self.log_callback:
@@ -421,10 +497,12 @@ class TrainingPipeline:
             # Compile results
             self.training_results = {
                 'success': True,
-                'best_model_path': best_model_path,
+                'best_model_path': self.callback.best_model_save_path,  # Use the dynamically updated path
                 'final_model_path': final_model_path,
                 'best_sharpe_ratio': self.callback.best_sharpe_ratio,
                 'best_mean_reward': self.callback.best_mean_reward,
+                'best_final_value': self.callback.best_final_value,
+                'best_model_timestep': self.callback.best_model_timestep,
                 'evaluations': self.callback.evaluations,
                 'detailed_training_history': self.callback.detailed_training_history,
                 'training_summary': {
@@ -447,8 +525,9 @@ class TrainingPipeline:
             
             if self.log_callback:
                 self.log_callback("Training completed successfully!")
-                self.log_callback(f"Best model saved to: {best_model_path}")
-                self.log_callback(f"Best Sharpe ratio: {self.callback.best_sharpe_ratio:.4f}")
+                self.log_callback(f"Best model saved to: {self.callback.best_model_save_path}")
+                self.log_callback(f"Best model achieved at step: {self.callback.best_model_timestep:,}")
+                self.log_callback(f"Best metrics - Sharpe: {self.callback.best_sharpe_ratio:.4f}, Mean Reward: {self.callback.best_mean_reward:.4f}, Final Value: ${self.callback.best_final_value:,.2f}")
             
             return self.training_results
             
