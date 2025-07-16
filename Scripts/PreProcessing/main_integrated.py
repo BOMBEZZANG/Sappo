@@ -208,10 +208,71 @@ class SappoIntegratedGUI:
         self.chart_frame = ttk.Frame(self.results_notebook)
         self.results_notebook.add(self.chart_frame, text="Performance Chart")
         
+        # Evaluation progress tab
+        self.eval_progress_frame = ttk.Frame(self.results_notebook)
+        self.results_notebook.add(self.eval_progress_frame, text="Training Progress")
+        self.setup_evaluation_progress_tab()
+        
         # Enable RL controls if available
         if not RL_AVAILABLE:
             for widget in [self.train_btn, self.evaluate_btn]:
                 widget.configure(state="disabled")
+    
+    def setup_evaluation_progress_tab(self):
+        """Setup the evaluation progress monitoring tab"""
+        # Configure grid
+        self.eval_progress_frame.columnconfigure(0, weight=1)
+        self.eval_progress_frame.rowconfigure(1, weight=1)
+        
+        # Title and info
+        title_frame = ttk.Frame(self.eval_progress_frame)
+        title_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=10, pady=5)
+        
+        ttk.Label(title_frame, text="Validation Evaluations Every 10k Steps", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky=tk.W)
+        
+        # Create treeview for evaluation results
+        columns = ('Timestep', 'Mean Reward', 'Std Reward', 'Sharpe Ratio', 
+                  'Total Return', 'Max Drawdown', 'Final Value', 'Trade Count')
+        
+        self.eval_tree = ttk.Treeview(self.eval_progress_frame, columns=columns, show='headings', height=15)
+        
+        # Configure column headings and widths
+        column_widths = {'Timestep': 80, 'Mean Reward': 100, 'Std Reward': 100, 
+                        'Sharpe Ratio': 100, 'Total Return': 100, 'Max Drawdown': 110,
+                        'Final Value': 100, 'Trade Count': 100}
+        
+        for col in columns:
+            self.eval_tree.heading(col, text=col)
+            self.eval_tree.column(col, width=column_widths.get(col, 100), minwidth=80)
+        
+        # Add scrollbars
+        eval_v_scrollbar = ttk.Scrollbar(self.eval_progress_frame, orient="vertical", command=self.eval_tree.yview)
+        eval_h_scrollbar = ttk.Scrollbar(self.eval_progress_frame, orient="horizontal", command=self.eval_tree.xview)
+        self.eval_tree.configure(yscrollcommand=eval_v_scrollbar.set, xscrollcommand=eval_h_scrollbar.set)
+        
+        # Grid layout
+        self.eval_tree.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(10, 0), pady=5)
+        eval_v_scrollbar.grid(row=1, column=1, sticky=(tk.N, tk.S), pady=5)
+        eval_h_scrollbar.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=(10, 0))
+        
+        # Summary frame at bottom
+        summary_frame = ttk.LabelFrame(self.eval_progress_frame, text="Current Best", padding="10")
+        summary_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=10, pady=5)
+        
+        # Best metrics display
+        self.best_sharpe_var = tk.StringVar(value="N/A")
+        self.best_return_var = tk.StringVar(value="N/A")
+        self.best_timestep_var = tk.StringVar(value="N/A")
+        
+        ttk.Label(summary_frame, text="Best Sharpe:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        ttk.Label(summary_frame, textvariable=self.best_sharpe_var, font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=1, sticky=tk.W, padx=(0, 20))
+        
+        ttk.Label(summary_frame, text="Best Return:").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        ttk.Label(summary_frame, textvariable=self.best_return_var, font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
+        
+        ttk.Label(summary_frame, text="At Step:").grid(row=0, column=4, sticky=tk.W, padx=(0, 5))
+        ttk.Label(summary_frame, textvariable=self.best_timestep_var, font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=5, sticky=tk.W)
     
     def setup_hyperparameter_inputs(self, parent):
         """Setup hyperparameter input widgets"""
@@ -437,6 +498,9 @@ class SappoIntegratedGUI:
         
         self.log_training_message("Starting RL training...")
         
+        # Clear previous evaluation results
+        self.clear_evaluation_progress()
+        
         thread = threading.Thread(target=self.run_training, 
                                 args=(hyperparams, reward_weights, total_timesteps))
         thread.daemon = True
@@ -451,7 +515,8 @@ class SappoIntegratedGUI:
                 reward_weights=reward_weights,
                 total_timesteps=total_timesteps,
                 model_save_dir="models",
-                log_callback=self.log_training_message
+                log_callback=self.log_training_message,
+                progress_callback=self.update_evaluation_progress
             )
             
             self.training_results = results
@@ -469,6 +534,81 @@ class SappoIntegratedGUI:
         
         finally:
             self.train_btn.config(state="normal")
+    
+    def clear_evaluation_progress(self):
+        """Clear the evaluation progress table"""
+        for item in self.eval_tree.get_children():
+            self.eval_tree.delete(item)
+        self.best_sharpe_var.set("N/A")
+        self.best_return_var.set("N/A")
+        self.best_timestep_var.set("N/A")
+    
+    def update_evaluation_progress(self, evaluation_data):
+        """Update the evaluation progress table with new data"""
+        if not evaluation_data:
+            return
+        
+        # This method is called from a different thread, so we need to schedule GUI updates
+        self.root.after(0, self._update_evaluation_progress_gui, evaluation_data)
+    
+    def _update_evaluation_progress_gui(self, evaluation_data):
+        """Update evaluation progress in the main thread"""
+        try:
+            # Extract metrics
+            timestep = evaluation_data.get('timestep', 0)
+            mean_reward = evaluation_data.get('mean_reward', 0)
+            std_reward = evaluation_data.get('std_reward', 0)
+            sharpe_ratio = evaluation_data.get('sharpe_ratio', 0)
+            total_return = evaluation_data.get('total_return', 0)
+            max_drawdown = evaluation_data.get('max_drawdown', 0)
+            
+            portfolio_stats = evaluation_data.get('portfolio_stats', {})
+            final_value = portfolio_stats.get('final_value', 0)
+            trade_count = portfolio_stats.get('trade_count', 0)
+            
+            # Format values for display  
+            values = (
+                f"{timestep:,}",
+                f"{mean_reward:.4f}",
+                f"{std_reward:.4f}", 
+                f"{sharpe_ratio:.4f}",
+                f"{total_return*100:.2f}%",  # Convert to percentage
+                f"{max_drawdown*100:.2f}%",  # Convert to percentage
+                f"${final_value:,.0f}",
+                f"{trade_count:.0f}"
+            )
+            
+            # Insert new row
+            item_id = self.eval_tree.insert('', 'end', values=values)
+            
+            # Highlight if this is a new best Sharpe ratio
+            try:
+                current_best = float(self.best_sharpe_var.get()) if self.best_sharpe_var.get() != "N/A" else -999
+                if sharpe_ratio > current_best:
+                    self.eval_tree.set(item_id, 'Sharpe Ratio', f"{sharpe_ratio:.4f} ⭐")
+                    self.best_sharpe_var.set(f"{sharpe_ratio:.4f}")
+                    self.best_return_var.set(f"{total_return*100:.2f}%")
+                    self.best_timestep_var.set(f"{timestep:,}")
+                    
+                    # Log the new best
+                    self.log_training_message(f"🌟 New best Sharpe ratio: {sharpe_ratio:.4f} at step {timestep:,}")
+            except:
+                # First entry
+                self.best_sharpe_var.set(f"{sharpe_ratio:.4f}")
+                self.best_return_var.set(f"{total_return*100:.2f}%")
+                self.best_timestep_var.set(f"{timestep:,}")
+            
+            # Auto-scroll to bottom
+            self.eval_tree.see(item_id)
+            
+            # Switch to Training Progress tab if not already visible
+            current_tab = self.results_notebook.index(self.results_notebook.select())
+            if current_tab != 2:  # Training Progress tab is index 2
+                self.results_notebook.select(2)
+                
+        except Exception as e:
+            self.log_training_message(f"Error updating progress table: {str(e)}")
+    
     
     def start_evaluation(self):
         """Start model evaluation"""

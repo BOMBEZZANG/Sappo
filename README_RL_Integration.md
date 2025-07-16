@@ -14,6 +14,7 @@ A comprehensive GUI-driven desktop application that manages the end-to-end workf
 - **Data Selection**: Load preprocessed `.npy` files
 - **Hyperparameter Configuration**: Learning rate, gamma, reward weights
 - **Training Pipeline**: GRU-based PPO agent with validation
+- **Real-time Progress Monitoring**: Live evaluation table updated every 10k steps
 - **Model Evaluation**: Comprehensive performance analysis
 - **Visualization**: Integrated performance charts
 - **TensorBoard Integration**: Real-time training monitoring
@@ -59,7 +60,10 @@ python main_integrated.py
 1. **Select Data**: Load preprocessed `.npy` file
 2. **Configure Parameters**: Set hyperparameters and reward weights
 3. **Start Training**: Train GRU-based PPO agent
-4. **Monitor Progress**: View real-time logs and TensorBoard
+4. **Monitor Progress**: 
+   - **Training Log**: Real-time training messages
+   - **Training Progress**: Live evaluation table every 10k steps
+   - **TensorBoard**: Advanced metrics visualization
 
 ### 3. Model Evaluation
 1. **Evaluate Model**: Test on unseen data
@@ -82,7 +86,11 @@ python main_integrated.py
 ### **Training Pipeline**
 - **Data Split**: 70% Train, 15% Validation, 15% Test
 - **Validation**: Automatic best model saving based on Sharpe ratio
-- **Monitoring**: TensorBoard logging and GUI progress tracking
+- **Real-time Monitoring**: 
+  - **Every 10k Steps**: Validation evaluation with structured results
+  - **Live Dashboard**: Evaluation table with metrics progression
+  - **Best Tracking**: Automatic highlighting of best Sharpe ratio
+  - **TensorBoard**: Advanced metrics and loss curves
 
 ## 🎯 Key Performance Metrics
 
@@ -132,6 +140,29 @@ Scripts/PreProcessing/
 - **Sharpe**: 0.5 (risk-adjusted return weight)
 - **Cost**: 1.0 (transaction cost penalty)
 - **MDD**: 0.5 (maximum drawdown penalty)
+
+## 📊 Real-time Training Progress
+
+### **Evaluation Progress Table**
+During training, every 10,000 timesteps, the system performs validation and displays:
+
+| Timestep | Mean Reward | Std Reward | Sharpe Ratio | Total Return | Max Drawdown | Final Value | Trade Count |
+|----------|-------------|------------|--------------|--------------|--------------|-------------|-------------|
+| 10,000   | -0.0020     | 0.0150     | -0.1340      | -5.00%       | 8.00%        | $9,500      | 15          |
+| 20,000   | 0.0010      | 0.0120     | 0.0830       | 2.00%        | 6.00%        | $10,200     | 22          |
+| 30,000   | 0.0050      | 0.0180     | 0.2780 ⭐    | 8.00%        | 4.00%        | $10,800     | 31          |
+
+**Features:**
+- **Live Updates**: Real-time progress during training
+- **Best Highlighting**: Star (⭐) marks new best Sharpe ratios
+- **Auto-scrolling**: Always shows latest evaluations
+- **Thread-safe**: Updates from training thread to GUI safely
+
+### **Progress Monitoring Benefits**
+- **Early Stopping**: Identify optimal training duration
+- **Hyperparameter Tuning**: See immediate impact of changes
+- **Performance Trends**: Track improvement over time
+- **Best Model Tracking**: Always know when best model was saved
 
 ## 🔧 Advanced Usage
 

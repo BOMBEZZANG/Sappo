@@ -21,6 +21,7 @@ class ValidationCallback(BaseCallback):
                  n_eval_episodes: int = 5,
                  best_model_save_path: str = None,
                  log_callback: Callable = None,
+                 progress_callback: Callable = None,
                  verbose: int = 1):
         """
         Initialize validation callback
@@ -31,6 +32,7 @@ class ValidationCallback(BaseCallback):
             n_eval_episodes: Number of episodes for each evaluation
             best_model_save_path: Path to save the best model
             log_callback: Callback function for logging messages
+            progress_callback: Callback function for structured progress updates
             verbose: Verbosity level
         """
         super().__init__(verbose)
@@ -39,6 +41,7 @@ class ValidationCallback(BaseCallback):
         self.n_eval_episodes = n_eval_episodes
         self.best_model_save_path = best_model_save_path
         self.log_callback = log_callback
+        self.progress_callback = progress_callback
         
         # Tracking variables
         self.best_mean_reward = -np.inf
@@ -123,6 +126,10 @@ class ValidationCallback(BaseCallback):
             'portfolio_stats': avg_stats
         }
         self.evaluations.append(evaluation_result)
+        
+        # Send structured progress update to GUI
+        if self.progress_callback:
+            self.progress_callback(evaluation_result)
     
     def _average_portfolio_stats(self, stats_list):
         """Average portfolio statistics across episodes"""
@@ -151,7 +158,8 @@ class TrainingPipeline:
                  data_path: str,
                  hyperparameters: Dict = None,
                  reward_weights: Dict = None,
-                 log_callback: Callable = None):
+                 log_callback: Callable = None,
+                 progress_callback: Callable = None):
         """
         Initialize training pipeline
         
@@ -160,6 +168,7 @@ class TrainingPipeline:
             hyperparameters: Training hyperparameters
             reward_weights: Reward function weights
             log_callback: Callback for logging messages
+            progress_callback: Callback for structured progress updates
         """
         self.data_path = data_path
         self.hyperparameters = hyperparameters or {}
@@ -167,6 +176,7 @@ class TrainingPipeline:
             'profit': 1.0, 'sharpe': 0.5, 'cost': 1.0, 'mdd': 0.5
         }
         self.log_callback = log_callback
+        self.progress_callback = progress_callback
         
         # Training components
         self.train_env = None
@@ -252,7 +262,8 @@ class TrainingPipeline:
             eval_freq=10000,  # Evaluate every 10k steps
             n_eval_episodes=5,
             best_model_save_path=best_model_path,
-            log_callback=self.log_callback
+            log_callback=self.log_callback,
+            progress_callback=self.progress_callback
         )
     
     def train(self, 
@@ -346,7 +357,8 @@ def train_sappo_agent(data_path: str,
                      reward_weights: Dict = None,
                      total_timesteps: int = 100000,
                      model_save_dir: str = "models",
-                     log_callback: Callable = None) -> Dict:
+                     log_callback: Callable = None,
+                     progress_callback: Callable = None) -> Dict:
     """
     Main function to train Sappo trading agent
     
@@ -357,6 +369,7 @@ def train_sappo_agent(data_path: str,
         total_timesteps: Total training timesteps
         model_save_dir: Directory to save models
         log_callback: Callback for logging
+        progress_callback: Callback for structured progress updates
         
     Returns:
         Training results dictionary
@@ -365,7 +378,8 @@ def train_sappo_agent(data_path: str,
         data_path=data_path,
         hyperparameters=hyperparameters,
         reward_weights=reward_weights,
-        log_callback=log_callback
+        log_callback=log_callback,
+        progress_callback=progress_callback
     )
     
     results = pipeline.train(

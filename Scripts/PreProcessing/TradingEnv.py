@@ -231,7 +231,7 @@ class TradingEnv(gym.Env):
         
         # Use first available close price as reference
         # This is a simplified approach - in practice you might want to use a specific coin
-        close_price_idx = 0  # Assuming first feature is a close price
+        close_price_idx = -1 # <- 수정된 코드 (마지막 인덱스)
         return float(step_data[close_price_idx])
     
     def _get_observation(self) -> np.ndarray:

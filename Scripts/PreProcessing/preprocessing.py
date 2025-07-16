@@ -136,7 +136,13 @@ class DataPreprocessor:
             elif 'value' in col_name.lower():
                 value_norm = data[col] / data[col].rolling(window=24).mean()
                 feature_data[f"{col_name}_norm"] = value_norm
-        
+            # <<<--- [코드 수정] 원본 종가 데이터를 보존하기 위해 추가 --- START --->>>
+            # 주요 코인의 1시간 봉 종가를 참조 가격으로 사용 (예: 첫 번째 코인)
+            base_coin_close_col = [col for col in data.columns if 'close_hour1' in str(col)][0]
+            feature_data['raw_close_price'] = data[base_coin_close_col]
+            # <<<--- [코드 수정] --- END --->>>
+
+
         print(f"Generated {len(feature_data.columns)} features")
         
         # Add cross-coin correlation features for major pairs

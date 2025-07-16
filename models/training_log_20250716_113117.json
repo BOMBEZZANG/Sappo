@@ -1,0 +1,105 @@
+{
+  "success": true,
+  "best_model_path": "models\\best_model_20250716_113117.zip",
+  "final_model_path": "models\\final_model_20250716_113117.zip",
+  "best_sharpe_ratio": 0.0,
+  "best_mean_reward": 0.0,
+  "evaluations": [
+    {
+      "timestep": 10000,
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "sharpe_ratio": 0.0,
+      "total_return": 0.0,
+      "max_drawdown": 0.0,
+      "portfolio_stats": {
+        "total_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "final_value": 10000.0,
+        "trade_count": 0.0,
+        "total_cost": 0.0
+      }
+    },
+    {
+      "timestep": 20000,
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "sharpe_ratio": 0.0,
+      "total_return": 0.0,
+      "max_drawdown": 0.0,
+      "portfolio_stats": {
+        "total_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "final_value": 10000.0,
+        "trade_count": 0.0,
+        "total_cost": 0.0
+      }
+    },
+    {
+      "timestep": 30000,
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "sharpe_ratio": 0.0,
+      "total_return": 0.0,
+      "max_drawdown": 0.0,
+      "portfolio_stats": {
+        "total_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "final_value": 10000.0,
+        "trade_count": 0.0,
+        "total_cost": 0.0
+      }
+    },
+    {
+      "timestep": 40000,
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "sharpe_ratio": 0.0,
+      "total_return": 0.0,
+      "max_drawdown": 0.0,
+      "portfolio_stats": {
+        "total_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "final_value": 10000.0,
+        "trade_count": 0.0,
+        "total_cost": 0.0
+      }
+    },
+    {
+      "timestep": 50000,
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "sharpe_ratio": 0.0,
+      "total_return": 0.0,
+      "max_drawdown": 0.0,
+      "portfolio_stats": {
+        "total_return": 0.0,
+        "sharpe_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "final_value": 10000.0,
+        "trade_count": 0.0,
+        "total_cost": 0.0
+      }
+    }
+  ],
+  "data_split": {
+    "train_samples": 9705,
+    "val_samples": 2080,
+    "test_samples": 2080
+  },
+  "hyperparameters": {
+    "learning_rate": 0.0001,
+    "gamma": 0.99
+  },
+  "reward_weights": {
+    "profit": 50.0,
+    "sharpe": 0.0,
+    "cost": 0.0,
+    "mdd": 0.0
+  },
+  "timestamp": "20250716_113117"
+}
