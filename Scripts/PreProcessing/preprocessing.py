@@ -11,11 +11,9 @@ class DataPreprocessor:
         
     def unify_timeframes(self, data_files: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
-        Unify all timeframes to 1-hour base by resampling and forward-filling.
+        Unify all coins and timeframes to 1-hour base, creating a single unified dataset.
         Expects files with format: upbit_{coin}_{timeframe}.csv
         """
-        unified_data = {}
-        
         # Group files by coin
         coins = {}
         for filename, df in data_files.items():
@@ -29,7 +27,12 @@ class DataPreprocessor:
                     coins[coin] = {}
                 coins[coin][timeframe] = df
         
-        # Process each coin
+        print(f"Found {len(coins)} coins: {list(coins.keys())}")
+        
+        # Process each coin and collect all unified data
+        all_coin_data = []
+        coin_names = []
+        
         for coin, timeframes in coins.items():
             coin_data = {}
             
@@ -59,19 +62,40 @@ class DataPreprocessor:
                     # Resample to 1-hour and forward fill
                     hourly_data = df.resample('1h').ffill()
                     
-                    # Add timeframe suffix to column names
-                    hourly_data.columns = [f"{col}_{tf}" for col in hourly_data.columns]
+                    # Add coin and timeframe prefix to column names
+                    hourly_data.columns = [f"{coin}_{col}_{tf}" for col in hourly_data.columns]
                     coin_data[tf] = hourly_data
             
             # Combine all timeframes for this coin
             if coin_data:
-                combined = pd.concat(coin_data.values(), axis=1)
-                combined = combined.dropna()  # Remove rows with missing data
-                unified_data[coin] = combined
+                combined_coin = pd.concat(coin_data.values(), axis=1)
+                all_coin_data.append(combined_coin)
+                coin_names.append(coin)
+                print(f"Processed {coin}: {combined_coin.shape[1]} features")
         
-        # Combine all coins
-        if unified_data:
-            final_data = pd.concat(unified_data.values(), axis=1, keys=unified_data.keys())
+        # Combine all coins into single dataset
+        if all_coin_data:
+            # Find common time range across all coins
+            start_date = max([df.index.min() for df in all_coin_data])
+            end_date = min([df.index.max() for df in all_coin_data])
+            
+            print(f"Common time range: {start_date} to {end_date}")
+            
+            # Align all coins to common time range
+            aligned_data = []
+            for i, df in enumerate(all_coin_data):
+                aligned = df.loc[start_date:end_date]
+                aligned_data.append(aligned)
+                print(f"{coin_names[i]} aligned: {aligned.shape}")
+            
+            # Concatenate all coins horizontally
+            final_data = pd.concat(aligned_data, axis=1)
+            final_data = final_data.dropna()  # Remove any remaining NaN rows
+            
+            print(f"Final unified dataset: {final_data.shape}")
+            print(f"Features per coin: ~{final_data.shape[1] // len(coin_names)}")
+            print(f"Total features: {final_data.shape[1]}")
+            
             return final_data
         else:
             raise ValueError("No valid data found for unification")
@@ -79,34 +103,88 @@ class DataPreprocessor:
     def create_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Convert absolute prices to percentage changes and create additional features.
+        Enhanced for multi-coin unified dataset.
         """
         feature_data = pd.DataFrame(index=data.index)
         
+        print(f"Creating features from {len(data.columns)} raw columns...")
+        
         for col in data.columns:
-            if isinstance(col, tuple):
-                # Multi-level columns (coin, feature_timeframe)
-                coin, feature_tf = col
-                col_name = f"{coin}_{feature_tf}"
-            else:
-                col_name = str(col)
+            col_name = str(col)
             
-            # Calculate percentage change
-            if 'close' in col_name.lower() or 'open' in col_name.lower() or 'high' in col_name.lower() or 'low' in col_name.lower():
+            # Price features: convert to percentage changes
+            if any(price_type in col_name.lower() for price_type in ['close', 'open', 'high', 'low']):
                 pct_change = data[col].pct_change()
                 feature_data[f"{col_name}_pct"] = pct_change
+                
+                # Add volatility (rolling std of returns)
+                if 'close' in col_name.lower():
+                    volatility = pct_change.rolling(window=24).std()
+                    feature_data[f"{col_name}_volatility"] = volatility
             
-            # Volume features (normalize by rolling mean)
+            # Volume features: normalize and add momentum
             elif 'volume' in col_name.lower():
+                # Volume normalized by 24h rolling average
                 volume_norm = data[col] / data[col].rolling(window=24).mean()
                 feature_data[f"{col_name}_norm"] = volume_norm
+                
+                # Volume momentum (current vs previous)
+                volume_momentum = data[col].pct_change()
+                feature_data[f"{col_name}_momentum"] = volume_momentum
             
-            # Keep original data as well for some features
-            else:
-                feature_data[col_name] = data[col]
+            # Value features (if present)
+            elif 'value' in col_name.lower():
+                value_norm = data[col] / data[col].rolling(window=24).mean()
+                feature_data[f"{col_name}_norm"] = value_norm
+        
+        print(f"Generated {len(feature_data.columns)} features")
+        
+        # Add cross-coin correlation features for major pairs
+        feature_data = self._add_correlation_features(feature_data, data)
         
         # Remove infinite and NaN values
         feature_data = feature_data.replace([np.inf, -np.inf], np.nan)
+        initial_rows = len(feature_data)
         feature_data = feature_data.dropna()
+        final_rows = len(feature_data)
+        
+        print(f"Removed {initial_rows - final_rows} rows with NaN values")
+        print(f"Final feature dataset: {feature_data.shape}")
+        
+        return feature_data
+    
+    def _add_correlation_features(self, feature_data: pd.DataFrame, raw_data: pd.DataFrame):
+        """
+        Add correlation features between major coin pairs.
+        """
+        # Find close prices for correlation
+        close_cols = [col for col in raw_data.columns if 'close_hour1' in str(col)]
+        
+        if len(close_cols) >= 2:
+            print(f"Adding correlation features for {len(close_cols)} coins...")
+            
+            # Collect all correlation features in a dictionary first
+            correlation_features = {}
+            
+            # Calculate rolling correlations between coins
+            for i, col1 in enumerate(close_cols[:5]):  # Limit to first 5 coins for performance
+                for col2 in close_cols[i+1:6]:  # Avoid duplicate pairs
+                    if col1 != col2:
+                        # 24h rolling correlation of returns
+                        returns1 = raw_data[col1].pct_change()
+                        returns2 = raw_data[col2].pct_change()
+                        correlation = returns1.rolling(window=24).corr(returns2)
+                        
+                        coin1 = str(col1).split('_')[0]
+                        coin2 = str(col2).split('_')[0]
+                        correlation_features[f"corr_{coin1}_{coin2}_24h"] = correlation
+            
+            # Add all correlation features at once using pd.concat
+            if correlation_features:
+                corr_df = pd.DataFrame(correlation_features, index=feature_data.index)
+                # Use pd.concat instead of individual assignments to avoid fragmentation
+                feature_data = pd.concat([feature_data, corr_df], axis=1)
+                print(f"Added {len(correlation_features)} correlation features")
         
         return feature_data
     

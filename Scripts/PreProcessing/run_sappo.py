@@ -53,14 +53,20 @@ def main():
     
     # Import and run the main application
     try:
-        from Scripts.PreProcessing.main import main as run_gui
+        # Add current directory to Python path for imports
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        
+        from main import main as run_gui
         run_gui()
     except Exception as e:
         print(f"❌ Error starting application: {e}")
         print("\nTroubleshooting:")
-        print("1. Ensure all files are in the same directory")
-        print("2. Check that main.py and preprocessing.py exist")
-        print("3. Verify Python version (3.7+ recommended)")
+        print("1. Run from Scripts/PreProcessing directory: cd Scripts/PreProcessing && python main.py")
+        print("2. Or run from project root: python Scripts/PreProcessing/main.py")
+        print("3. Check that main.py and preprocessing.py exist")
+        print("4. Verify Python version (3.7+ recommended)")
         sys.exit(1)
 
 if __name__ == "__main__":

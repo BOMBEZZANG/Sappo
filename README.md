@@ -77,12 +77,22 @@ This will create sample data and test the preprocessing pipeline.
 
 ## Data Processing Pipeline
 
-1. **Data Validation**: Checks for required columns
-2. **Timeframe Unification**: Resamples all data to 1-hour frequency
-3. **Feature Engineering**: Converts prices to percentage changes
-4. **Sliding Windows**: Creates overlapping windows for RL training
-5. **Normalization**: Applies Z-score normalization to each window
-6. **Output**: Saves as 3D NumPy array (samples, window_size, features)
+1. **Data Validation**: Checks for required columns across all coins
+2. **Multi-Coin Unification**: Combines all coins and timeframes into single dataset
+3. **Time Alignment**: Aligns all coins to common time range
+4. **Enhanced Feature Engineering**: 
+   - Price percentage changes and volatility
+   - Volume normalization and momentum
+   - Cross-coin correlation features
+5. **Sliding Windows**: Creates overlapping windows for RL training
+6. **Normalization**: Applies Z-score normalization to each window
+7. **Output**: Single unified 3D NumPy array (samples, window_size, total_features)
+
+### Multi-Coin Benefits:
+- **Market Context**: Learns relationships between different cryptocurrencies
+- **Portfolio Trading**: Enables multi-asset trading strategies  
+- **Better Generalization**: More training data reduces overfitting
+- **Cross-Coin Signals**: Captures market-wide patterns and correlations
 
 ## Configuration
 

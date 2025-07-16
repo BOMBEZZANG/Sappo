@@ -150,13 +150,15 @@ class SappoPreprocessingGUI:
             )
             
             # Save results
-            self.log_message("Saving results...")
+            self.log_message("Saving unified dataset...")
             output_path = self.save_results(self.processed_data)
             
             self.update_progress(100, "Complete!")
-            self.log_message(f"Preprocessing completed successfully!")
+            self.log_message(f"Multi-coin preprocessing completed successfully!")
             self.log_message(f"Output saved to: {output_path}")
-            self.log_message(f"Final data shape: {self.processed_data.shape}")
+            self.log_message(f"Final unified dataset shape: {self.processed_data.shape}")
+            self.log_message(f"Ready for RL training with {self.processed_data.shape[0]} samples")
+            self.log_message(f"Each sample contains {self.processed_data.shape[2]} features from all coins")
             
         except Exception as e:
             self.log_message(f"Error during preprocessing: {str(e)}")
