@@ -88,13 +88,10 @@ class PerformanceEvaluator:
         """Run a single evaluation episode"""
         obs, _ = env.reset()
         
-        # Track episode data
+        # Track only essential data
         portfolio_values = []
-        actions = []
-        rewards = []
-        positions = []
-        timestamps = []
-        prices = []
+        completed_trades = []
+        current_trade = None
         
         episode_reward = 0
         step_count = 0
@@ -107,13 +104,46 @@ class PerformanceEvaluator:
             # Take step
             obs, reward, terminated, truncated, info = env.step(action)
             
-            # Record data
-            portfolio_values.append(info['portfolio_value'])
-            actions.append(action)
-            rewards.append(reward)
-            positions.append(info['position'])
-            prices.append(info['current_price'])
-            timestamps.append(step_count)
+            # Record portfolio value progression
+            portfolio_values.append(float(info.get('portfolio_value', 0)))
+            
+            # Track completed trades only
+            if 'trade_executed' in info and info['trade_executed']:
+                current_price = float(info.get('current_price', 0))
+                position_before = float(info.get('position_before', 0))
+                position_after = float(info.get('position', 0))
+                portfolio_value = float(info.get('portfolio_value', 0))
+                
+                if action == 1 and position_before <= 0:  # Buy (entry)
+                    current_trade = {
+                        'trade_id': len(completed_trades) + 1,
+                        'entry_price': current_price,
+                        'entry_step': step_count,
+                        'entry_time': step_count,  # You can convert to actual time if needed
+                        'entry_portfolio_value': portfolio_value,
+                        'entry_cost': float(info.get('trade_cost', 0))
+                    }
+                elif action == 2 and position_before >= 0 and current_trade:  # Sell (exit)
+                    current_trade.update({
+                        'exit_price': current_price,
+                        'exit_step': step_count,
+                        'exit_time': step_count,
+                        'exit_portfolio_value': portfolio_value,
+                        'exit_cost': float(info.get('trade_cost', 0))
+                    })
+                    
+                    # Calculate trade metrics
+                    entry_price = current_trade['entry_price']
+                    exit_price = current_trade['exit_price']
+                    
+                    current_trade['profit_pct'] = ((exit_price - entry_price) / entry_price) * 100
+                    current_trade['profit_absolute'] = current_trade['exit_portfolio_value'] - current_trade['entry_portfolio_value']
+                    current_trade['total_cost'] = current_trade['entry_cost'] + current_trade['exit_cost']
+                    current_trade['holding_period'] = current_trade['exit_step'] - current_trade['entry_step']
+                    current_trade['is_profitable'] = current_trade['profit_pct'] > 0
+                    
+                    completed_trades.append(current_trade)
+                    current_trade = None
             
             episode_reward += reward
             step_count += 1
@@ -122,16 +152,47 @@ class PerformanceEvaluator:
         # Get final portfolio statistics
         portfolio_stats = env.get_portfolio_stats()
         
+        # Calculate episode-specific metrics
+        initial_value = portfolio_values[0] if portfolio_values else 0
+        final_value = portfolio_values[-1] if portfolio_values else 0
+        
+        # Calculate trade statistics
+        profitable_trades = [t for t in completed_trades if t['is_profitable']]
+        losing_trades = [t for t in completed_trades if not t['is_profitable']]
+        
+        trade_stats = {
+            'total_trades': len(completed_trades),
+            'profitable_trades': len(profitable_trades),
+            'losing_trades': len(losing_trades),
+            'win_rate': (len(profitable_trades) / len(completed_trades)) * 100 if completed_trades else 0,
+            'avg_profit_per_trade': np.mean([t['profit_pct'] for t in completed_trades]) if completed_trades else 0,
+            'avg_winning_trade': np.mean([t['profit_pct'] for t in profitable_trades]) if profitable_trades else 0,
+            'avg_losing_trade': np.mean([t['profit_pct'] for t in losing_trades]) if losing_trades else 0,
+            'best_trade': max(completed_trades, key=lambda x: x['profit_pct']) if completed_trades else None,
+            'worst_trade': min(completed_trades, key=lambda x: x['profit_pct']) if completed_trades else None,
+            'total_trading_cost': sum([t['total_cost'] for t in completed_trades]),
+            'avg_holding_period': np.mean([t['holding_period'] for t in completed_trades]) if completed_trades else 0
+        }
+        
+        episode_metrics = {
+            'initial_portfolio_value': initial_value,
+            'final_portfolio_value': final_value,
+            'total_return_pct': ((final_value - initial_value) / initial_value) * 100 if initial_value > 0 else 0,
+            'episode_reward': float(episode_reward),
+            'steps_taken': step_count
+        }
+        
         return {
             'episode': episode_num,
-            'episode_reward': episode_reward,
-            'step_count': step_count,
-            'portfolio_values': portfolio_values,
-            'actions': actions,
-            'rewards': rewards,
-            'positions': positions,
-            'prices': prices,
-            'timestamps': timestamps,
+            'episode_metrics': episode_metrics,
+            'completed_trades': completed_trades,
+            'trade_statistics': trade_stats,
+            'portfolio_progression': {
+                'initial_value': initial_value,
+                'final_value': final_value,
+                'max_value': max(portfolio_values) if portfolio_values else 0,
+                'min_value': min(portfolio_values) if portfolio_values else 0
+            },
             'portfolio_stats': portfolio_stats
         }
     
@@ -198,6 +259,16 @@ class PerformanceEvaluator:
         
         results['enhanced_metrics'] = enhanced_metrics
         return results
+    
+    def _calculate_episode_drawdown(self, portfolio_values):
+        """Calculate maximum drawdown for an episode"""
+        if len(portfolio_values) < 2:
+            return 0.0
+        
+        portfolio_array = np.array(portfolio_values)
+        peak = np.maximum.accumulate(portfolio_array)
+        drawdown = (peak - portfolio_array) / peak
+        return float(np.max(drawdown) * 100)
     
     def _calculate_annualized_return(self, portfolio_values: np.ndarray) -> float:
         """Calculate annualized return"""
@@ -455,10 +526,16 @@ Avg Steps per Episode: {results.get('avg_step_count', 0)}
         os.makedirs(save_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Save JSON results
-        json_path = os.path.join(save_dir, f"{prefix}_results_{timestamp}.json")
+        # Save detailed JSON results
+        json_path = os.path.join(save_dir, f"{prefix}_detailed_results_{timestamp}.json")
         with open(json_path, 'w') as f:
             json.dump(self.evaluation_results, f, indent=2, default=str)
+        
+        # Save summary JSON (lighter version)
+        summary_json_path = os.path.join(save_dir, f"{prefix}_summary_{timestamp}.json")
+        summary_results = self._create_summary_results()
+        with open(summary_json_path, 'w') as f:
+            json.dump(summary_results, f, indent=2, default=str)
         
         # Save text report
         report_path = os.path.join(save_dir, f"{prefix}_report_{timestamp}.txt")
@@ -468,18 +545,115 @@ Avg Steps per Episode: {results.get('avg_step_count', 0)}
         plot_path = os.path.join(save_dir, f"{prefix}_performance_{timestamp}.png")
         self.plot_performance(plot_path)
         
+        # Save trading history CSV
+        csv_path = os.path.join(save_dir, f"{prefix}_trading_history_{timestamp}.csv")
+        self._save_trading_history_csv(csv_path)
+        
         self.log(f"All evaluation results saved to {save_dir}")
         
         return {
-            'json_path': json_path,
+            'detailed_json_path': json_path,
+            'summary_json_path': summary_json_path,
             'report_path': report_path,
-            'plot_path': plot_path
+            'plot_path': plot_path,
+            'csv_path': csv_path
         }
+    
+    def _create_summary_results(self) -> Dict:
+        """Create a summary version of results without detailed step-by-step data"""
+        if not self.evaluation_results:
+            return {}
+        
+        results = self.evaluation_results.copy()
+        enhanced = results.get('enhanced_metrics', {})
+        
+        # Create summary without detailed arrays
+        summary = {
+            'evaluation_summary': {
+                'timestamp': datetime.now().isoformat(),
+                'n_episodes': results.get('n_episodes', 0),
+                'avg_episode_reward': results.get('avg_episode_reward', 0),
+                'avg_step_count': results.get('avg_step_count', 0)
+            },
+            'performance_metrics': {
+                'total_return_pct': enhanced.get('total_return_pct', 0),
+                'annualized_return': enhanced.get('annualized_return', 0),
+                'volatility': enhanced.get('volatility', 0),
+                'sharpe_ratio': enhanced.get('sharpe_ratio', 0),
+                'sortino_ratio': enhanced.get('sortino_ratio', 0),
+                'max_drawdown_pct': enhanced.get('max_drawdown_pct', 0),
+                'win_rate': enhanced.get('win_rate', 0),
+                'profit_factor': enhanced.get('profit_factor', 0),
+                'avg_trade_return': enhanced.get('avg_trade_return', 0)
+            },
+            'portfolio_stats': results.get('portfolio_stats', {}),
+            'benchmark': results.get('benchmark', {}),
+            'trade_summary': self._create_trade_summary()
+        }
+        
+        return summary
+    
+    def _create_trade_summary(self) -> Dict:
+        """Create a summary of all trades across episodes"""
+        if not self.evaluation_results or 'all_episodes' not in self.evaluation_results:
+            return {}
+        
+        all_trades = []
+        for episode in self.evaluation_results['all_episodes']:
+            all_trades.extend(episode.get('completed_trades', []))
+        
+        if not all_trades:
+            return {'total_trades': 0}
+        
+        profitable_trades = [t for t in all_trades if t.get('is_profitable', False)]
+        losing_trades = [t for t in all_trades if not t.get('is_profitable', False)]
+        
+        return {
+            'total_trades': len(all_trades),
+            'profitable_trades': len(profitable_trades),
+            'losing_trades': len(losing_trades),
+            'win_rate': (len(profitable_trades) / len(all_trades)) * 100 if all_trades else 0,
+            'avg_profit_per_trade': np.mean([t.get('profit_pct', 0) for t in all_trades]) if all_trades else 0,
+            'avg_winning_trade': np.mean([t.get('profit_pct', 0) for t in profitable_trades]) if profitable_trades else 0,
+            'avg_losing_trade': np.mean([t.get('profit_pct', 0) for t in losing_trades]) if losing_trades else 0,
+            'best_trade_profit': max([t.get('profit_pct', 0) for t in all_trades]) if all_trades else 0,
+            'worst_trade_loss': min([t.get('profit_pct', 0) for t in all_trades]) if all_trades else 0,
+            'total_trading_cost': sum([t.get('total_cost', 0) for t in all_trades]),
+            'avg_holding_period': np.mean([t.get('holding_period', 0) for t in all_trades]) if all_trades else 0,
+            'entry_price_range': {
+                'min': min([t.get('entry_price', 0) for t in all_trades]) if all_trades else 0,
+                'max': max([t.get('entry_price', 0) for t in all_trades]) if all_trades else 0
+            },
+            'exit_price_range': {
+                'min': min([t.get('exit_price', 0) for t in all_trades]) if all_trades else 0,
+                'max': max([t.get('exit_price', 0) for t in all_trades]) if all_trades else 0
+            }
+        }
+    
+    def _save_trading_history_csv(self, csv_path: str):
+        """Save trading history as CSV for easy analysis"""
+        if not self.evaluation_results or 'all_episodes' not in self.evaluation_results:
+            return
+        
+        all_trades = []
+        for episode_idx, episode in enumerate(self.evaluation_results['all_episodes']):
+            for trade in episode.get('completed_trades', []):
+                trade_row = trade.copy()
+                trade_row['episode'] = episode_idx
+                all_trades.append(trade_row)
+        
+        if all_trades:
+            df = pd.DataFrame(all_trades)
+            df.to_csv(csv_path, index=False)
+            self.log(f"Trading history CSV saved to {csv_path}")
+        else:
+            self.log("No trades to save to CSV")
 
 def evaluate_sappo_model(model_path: str,
                         test_data: np.ndarray,
                         reward_weights: Dict = None,
                         save_dir: str = "evaluation_results",
+                        n_episodes: int = 1,
                         log_callback: Callable = None) -> Dict:
     """
     Main function to evaluate Sappo trading model
@@ -489,6 +663,7 @@ def evaluate_sappo_model(model_path: str,
         test_data: Test dataset
         reward_weights: Reward function weights
         save_dir: Directory to save results
+        n_episodes: Number of evaluation episodes
         log_callback: Callback for logging
         
     Returns:
@@ -499,7 +674,8 @@ def evaluate_sappo_model(model_path: str,
     results = evaluator.evaluate_agent(
         model_path=model_path,
         test_data=test_data,
-        reward_weights=reward_weights
+        reward_weights=reward_weights,
+        n_episodes=n_episodes
     )
     
     # Save all results

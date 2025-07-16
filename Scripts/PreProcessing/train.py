@@ -47,6 +47,7 @@ class ValidationCallback(BaseCallback):
         self.best_mean_reward = -np.inf
         self.best_sharpe_ratio = -np.inf
         self.evaluations = []
+        self.detailed_training_history = []
         
     def _init_callback(self) -> None:
         """Initialize callback"""
@@ -63,23 +64,74 @@ class ValidationCallback(BaseCallback):
         """Evaluate agent on validation set"""
         episode_rewards = []
         portfolio_stats = []
+        trade_summaries = []
         
         for episode in range(self.n_eval_episodes):
             obs, _ = self.validation_env.reset()
             episode_reward = 0
             done = False
             
+            # Track trade data only
+            trades = []
+            current_trade = None
+            
             while not done:
                 action, _ = self.model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = self.validation_env.step(action)
                 episode_reward += reward
                 done = terminated or truncated
+                
+                # Track trades only
+                if 'trade_executed' in info and info['trade_executed']:
+                    current_price = float(info.get('current_price', 0))
+                    position_before = float(info.get('position_before', 0))
+                    position_after = float(info.get('position', 0))
+                    
+                    if action == 1 and position_before <= 0:  # Buy (entry)
+                        current_trade = {
+                            'trade_type': 'buy',
+                            'entry_price': current_price,
+                            'entry_time': len(trades),  # Use trade count as time reference
+                            'cost': float(info.get('trade_cost', 0)),
+                            'portfolio_value_at_entry': float(info.get('portfolio_value', 0))
+                        }
+                    elif action == 2 and position_before >= 0 and current_trade:  # Sell (exit)
+                        current_trade.update({
+                            'exit_price': current_price,
+                            'exit_time': len(trades),  # Use trade count as time reference
+                            'exit_cost': float(info.get('trade_cost', 0)),
+                            'portfolio_value_at_exit': float(info.get('portfolio_value', 0))
+                        })
+                        
+                        # Calculate profit/loss
+                        profit_pct = ((current_trade['exit_price'] - current_trade['entry_price']) / current_trade['entry_price']) * 100
+                        current_trade['profit_pct'] = profit_pct
+                        current_trade['profit_absolute'] = current_trade['portfolio_value_at_exit'] - current_trade['portfolio_value_at_entry']
+                        current_trade['total_cost'] = current_trade['cost'] + current_trade['exit_cost']
+                        current_trade['holding_period'] = current_trade['exit_time'] - current_trade['entry_time']
+                        
+                        trades.append(current_trade)
+                        current_trade = None
             
             episode_rewards.append(episode_reward)
             
             # Get portfolio statistics for this episode
             stats = self.validation_env.get_portfolio_stats()
             portfolio_stats.append(stats)
+            
+            # Create episode summary focused on trades
+            episode_summary = {
+                'episode': episode,
+                'total_reward': float(episode_reward),
+                'trades': trades,
+                'total_trades': len(trades),
+                'profitable_trades': len([t for t in trades if t.get('profit_pct', 0) > 0]),
+                'avg_profit_per_trade': np.mean([t.get('profit_pct', 0) for t in trades]) if trades else 0,
+                'total_trading_cost': sum([t.get('total_cost', 0) for t in trades]),
+                'final_stats': stats
+            }
+            
+            trade_summaries.append(episode_summary)
         
         # Calculate validation metrics
         mean_reward = np.mean(episode_rewards)
@@ -115,6 +167,22 @@ class ValidationCallback(BaseCallback):
                 else:
                     print(f"New best model saved! Sharpe ratio: {sharpe_ratio:.4f}")
         
+        # Calculate aggregated trade statistics
+        all_trades = []
+        for episode in trade_summaries:
+            all_trades.extend(episode['trades'])
+        
+        trade_stats = {
+            'total_trades': len(all_trades),
+            'profitable_trades': len([t for t in all_trades if t.get('profit_pct', 0) > 0]),
+            'win_rate': len([t for t in all_trades if t.get('profit_pct', 0) > 0]) / len(all_trades) * 100 if all_trades else 0,
+            'avg_profit_per_trade': np.mean([t.get('profit_pct', 0) for t in all_trades]) if all_trades else 0,
+            'best_trade': max(all_trades, key=lambda x: x.get('profit_pct', 0)) if all_trades else None,
+            'worst_trade': min(all_trades, key=lambda x: x.get('profit_pct', 0)) if all_trades else None,
+            'total_trading_cost': sum([t.get('total_cost', 0) for t in all_trades]),
+            'avg_holding_period': np.mean([t.get('holding_period', 0) for t in all_trades]) if all_trades else 0
+        }
+        
         # Store evaluation results
         evaluation_result = {
             'timestep': self.n_calls,
@@ -123,9 +191,18 @@ class ValidationCallback(BaseCallback):
             'sharpe_ratio': sharpe_ratio,
             'total_return': total_return,
             'max_drawdown': max_drawdown,
-            'portfolio_stats': avg_stats
+            'portfolio_stats': avg_stats,
+            'trade_summaries': trade_summaries,
+            'aggregated_trade_stats': trade_stats
         }
         self.evaluations.append(evaluation_result)
+        
+        # Store in detailed training history
+        self.detailed_training_history.append({
+            'training_step': self.n_calls,
+            'validation_result': evaluation_result,
+            'timestamp': datetime.now().isoformat()
+        })
         
         # Send structured progress update to GUI
         if self.progress_callback:
@@ -318,6 +395,13 @@ class TrainingPipeline:
                 'best_sharpe_ratio': self.callback.best_sharpe_ratio,
                 'best_mean_reward': self.callback.best_mean_reward,
                 'evaluations': self.callback.evaluations,
+                'detailed_training_history': self.callback.detailed_training_history,
+                'training_summary': {
+                    'total_timesteps': total_timesteps,
+                    'evaluation_frequency': self.callback.eval_freq,
+                    'n_evaluation_episodes': self.callback.n_eval_episodes,
+                    'total_evaluations': len(self.callback.evaluations)
+                },
                 'data_split': {
                     'train_samples': train_data.shape[0],
                     'val_samples': val_data.shape[0],

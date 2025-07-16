@@ -322,6 +322,12 @@ class SappoIntegratedGUI:
         ttk.Label(weight_frame, text="MDD:").grid(row=0, column=6, padx=(0, 5))
         self.w_mdd_var = tk.StringVar(value="0.5")
         ttk.Entry(weight_frame, textvariable=self.w_mdd_var, width=8).grid(row=0, column=7)
+
+                # ⭐ [새 코드 추가] 이 부분을 추가하세요 --- START
+        ttk.Label(weight_frame, text="Trade Incentive:").grid(row=0, column=8, padx=(10, 5))
+        self.w_incentive_var = tk.StringVar(value="0.0") # 거래 장려는 기본값 0으로 시작
+        ttk.Entry(weight_frame, textvariable=self.w_incentive_var, width=8).grid(row=0, column=9)
+        # ⭐ [새 코드 추가] --- END
     
     # Preprocessing methods (from original GUI)
     def log_message(self, message):
@@ -477,7 +483,9 @@ class SappoIntegratedGUI:
                 'profit': float(self.w_profit_var.get()),
                 'sharpe': float(self.w_sharpe_var.get()),
                 'cost': float(self.w_cost_var.get()),
-                'mdd': float(self.w_mdd_var.get())
+                'mdd': float(self.w_mdd_var.get()),
+                'trade_incentive': float(self.w_incentive_var.get())
+
             }
             
             total_timesteps = int(self.timesteps_var.get())

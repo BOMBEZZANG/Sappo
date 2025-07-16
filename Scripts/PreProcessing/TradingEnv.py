@@ -72,6 +72,7 @@ class TradingEnv(gym.Env):
         )
         
         # Environment state
+        self.last_action = 0
         self.reset()
     
     def reset(self, *, seed=None, options=None) -> Tuple[np.ndarray, Dict[str, Any]]:
@@ -106,6 +107,9 @@ class TradingEnv(gym.Env):
         # Get current price (using first coin's close price as reference)
         current_price = self._get_current_price()
         
+        # Store position before action for trade tracking
+        position_before = self.position
+        
         # Execute action
         reward = self._execute_action(action, current_price)
         
@@ -125,28 +129,43 @@ class TradingEnv(gym.Env):
         observation = self._get_observation()
         info = self._get_info()
         
+        # Add trade tracking information
+        info['position_before'] = position_before
+        info['trade_executed'] = position_before != self.position
+        info['trade_cost'] = self.total_cost - info.get('previous_total_cost', 0)
+        info['previous_total_cost'] = self.total_cost
+        
+        # Calculate unrealized PnL
+        if self.position != 0 and self.entry_price > 0:
+            info['unrealized_pnl'] = (current_price - self.entry_price) / self.entry_price * self.position
+        else:
+            info['unrealized_pnl'] = 0.0
+        
         return observation, reward, terminated, truncated, info
     
     def _execute_action(self, action: int, current_price: float) -> float:
-        """Execute trading action and return reward"""
-        
-        # Store previous portfolio value for reward calculation
-        prev_portfolio_value = self._calculate_portfolio_value(current_price)
-        
-        # Execute action
-        if action == 1 and self.position <= 0:  # Buy
-            self._execute_buy(current_price)
-        elif action == 2 and self.position >= 0:  # Sell
-            self._execute_sell(current_price)
-        # action == 0 (Hold) requires no execution
-        
-        # Calculate new portfolio value
-        new_portfolio_value = self._calculate_portfolio_value(current_price)
-        
-        # Calculate reward
-        reward = self._calculate_reward(prev_portfolio_value, new_portfolio_value)
-        
-        return reward
+            """Execute trading action and return reward"""
+            
+            # Store previous portfolio value for reward calculation
+            prev_portfolio_value = self._calculate_portfolio_value(current_price)
+
+            # Store the current action to be used in the reward calculation
+            self.last_action = action
+            
+            # Execute the trading action (Buy, Sell, or Hold)
+            if action == 1 and self.position <= 0:  # Buy
+                self._execute_buy(current_price)
+            elif action == 2 and self.position >= 0:  # Sell
+                self._execute_sell(current_price)
+            # if action is 0 (Hold), no execution is needed
+            
+            # Calculate new portfolio value after the action
+            new_portfolio_value = self._calculate_portfolio_value(current_price)
+            
+            # Calculate reward based on the outcome of the action
+            reward = self._calculate_reward(prev_portfolio_value, new_portfolio_value)
+            
+            return reward
     
     def _execute_buy(self, price: float):
         """Execute buy order"""
@@ -196,16 +215,17 @@ class TradingEnv(gym.Env):
     def _calculate_reward(self, prev_value: float, new_value: float) -> float:
         """
         Calculate multi-component reward:
-        R_t = w1*R_profit + w2*R_sharpe - w3*R_cost - w4*R_mdd
+        R_t = w1*R_profit + w2*R_sharpe - w3*R_cost - w4*R_mdd + w5*R_trade
         """
         
-        # R_profit: Portfolio return
+        # ... (profit_return, sharpe_component, cost_penalty, current_drawdown 계산 로직은 기존과 동일)
+        # R_profit: 포트폴리오 수익률
         if prev_value > 0:
             profit_return = (new_value - prev_value) / prev_value
         else:
             profit_return = 0.0
         
-        # R_sharpe: Simplified Sharpe ratio component
+        # R_sharpe: 간소화된 샤프 지수 요소
         if len(self.portfolio_values) > 1:
             returns = np.diff(self.portfolio_values) / np.array(self.portfolio_values[:-1])
             if len(returns) > 1 and np.std(returns) > 0:
@@ -215,21 +235,29 @@ class TradingEnv(gym.Env):
         else:
             sharpe_component = 0.0
         
-        # R_cost: Transaction cost penalty
+        # R_cost: 거래 비용 패널티
         cost_penalty = self.total_cost / self.initial_balance
         
-        # R_mdd: Maximum drawdown penalty
+        # R_mdd: 최대 낙폭 패널티
         if self.max_portfolio_value > 0:
             current_drawdown = (self.max_portfolio_value - new_value) / self.max_portfolio_value
         else:
             current_drawdown = 0.0
-        
-        # Combine rewards
+
+        # ⭐ 2. 거래 장려 보너스 계산
+        trade_incentive_reward = 0.0
+        if self.last_action == 1 or self.last_action == 2:  # 행동이 매수 또는 매도일 경우
+            # self.reward_weights 딕셔너리에서 'trade_incentive' 값을 가져옵니다.
+            # 만약 값이 없으면 0을 기본값으로 사용합니다.
+            trade_incentive_reward = self.reward_weights.get('trade_incentive', 0.0)
+
+        # ⭐ 3. 최종 보상 조합 업데이트
         reward = (
-            self.reward_weights['profit'] * profit_return +
-            self.reward_weights['sharpe'] * sharpe_component -
-            self.reward_weights['cost'] * cost_penalty -
-            self.reward_weights['mdd'] * current_drawdown
+            self.reward_weights.get('profit', 1.0) * profit_return +
+            self.reward_weights.get('sharpe', 0.0) * sharpe_component -
+            self.reward_weights.get('cost', 1.0) * cost_penalty -
+            self.reward_weights.get('mdd', 0.0) * current_drawdown +
+            trade_incentive_reward  # 거래 장려 보상을 최종 보상에 더합니다.
         )
         
         return reward
@@ -296,6 +324,11 @@ class TradingEnv(gym.Env):
         current_price = self._get_current_price()
         portfolio_value = self._calculate_portfolio_value(current_price)
         
+        # Calculate unrealized PnL
+        unrealized_pnl = 0.0
+        if self.position != 0 and self.entry_price > 0:
+            unrealized_pnl = (current_price - self.entry_price) / self.entry_price * self.position
+        
         return {
             'portfolio_value': portfolio_value,
             'position': self.position,
@@ -304,7 +337,9 @@ class TradingEnv(gym.Env):
             'trade_count': self.trade_count,
             'total_cost': self.total_cost,
             'current_step': self.current_step,
-            'current_price': current_price
+            'current_price': current_price,
+            'unrealized_pnl': unrealized_pnl,
+            'entry_price': self.entry_price
         }
     
     def get_portfolio_stats(self) -> Dict[str, float]:
